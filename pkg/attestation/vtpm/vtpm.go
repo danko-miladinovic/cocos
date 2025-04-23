@@ -112,7 +112,8 @@ func New(teeNonce, vtpmNonce, pubKeyTLS []byte, teeAttestation bool) attestation
 		TeeNonce:      teeNonce,
 		VTpmNonce:     vtpmNonce,
 		PubKeyTLS:     pubKeyTLS,
-		TeeAttestaion: teeAttestation}
+		TeeAttestaion: teeAttestation,
+	}
 }
 
 func (v provider) FetchAttestation() ([]byte, error) {
