@@ -88,10 +88,10 @@ func (v *qemuVM) Start() (err error) {
 			return err
 		}
 
-		dstDiskFile := fmt.Sprintf("%s/%s-%s.qcow2", tmpDir, diskDstName, id)
+		dstDiskFile := fmt.Sprintf("%s/%s-%s.%s", tmpDir, diskDstName, id, v.vmi.Config.DiskConfig.Format)
 		sizeArg := fmt.Sprintf("%dG", sizeGB+luksHeaderIncreaseSizeGB)
 
-		cmd := exec.Command("qemu-img", "create", "-f", "qcow2", dstDiskFile, sizeArg)
+		cmd := exec.Command("qemu-img", "create", "-f", v.vmi.Config.DiskConfig.Format, dstDiskFile, sizeArg)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("qemu-img create failed: %w: %s", err, string(out))
 		}
