@@ -22,6 +22,10 @@ in the Buildroot early userspace init script at
   NoCloud `seed.iso`.
 - [qemu.sh](./qemu.sh): creates `seed.iso`, recreates the writable qcow2 overlay,
   and launches the preparation VM.
+- [../cloud/.env](../cloud/.env): shared defaults currently reused by the
+  `cloud-init` scripts.
+- [../cloud/meta-data](../cloud/meta-data): shared NoCloud meta-data currently
+  reused by the `cloud-init` scripts.
 - [buildroot](./buildroot): Buildroot external tree used for the FDE initramfs.
 - [buildroot/configs/cocos_defconfig](./buildroot/configs/cocos_defconfig):
   builds the FDE initramfs with NBD, `cryptsetup`, `kpartx`, `udev`, TPM2 tools,
@@ -36,12 +40,15 @@ in the Buildroot early userspace init script at
 
 Install these on the host:
 
-- `qemu-system-x86_64` or whatever binary is set in [`.env`](../cloud/.env)
+- `qemu-system-x86_64` or whatever binary is set in the shared [`.env`](../cloud/.env)
 - `qemu-img`
 - `wget`
 - one of `xorriso`, `genisoimage`, or `mkisofs`
 
-The VM defaults are read from [`.env`](../cloud/.env).
+This workflow does not have its own `.env` file under `hal/cloud-init`. Today,
+both [qemu.sh](./qemu.sh) and [create-seed-iso.sh](./create-seed-iso.sh) reuse
+the shared defaults from [../cloud/.env](../cloud/.env), and the default
+NoCloud meta-data comes from [../cloud/meta-data](../cloud/meta-data).
 
 For the FDE source-image export flow, the host also needs QEMU NBD support,
 usually provided by `qemu-utils` or `qemu-tools`.
@@ -112,21 +119,33 @@ cd ./cocos/hal/cloud-init
 sudo ./qemu.sh
 ```
 
+By default, [qemu.sh](./qemu.sh) downloads the Ubuntu Noble cloud image from:
+
+- <https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img>
+
+To download the image manually with `curl`:
+
+```bash
+cd ./cocos/hal/cloud-init
+curl -L https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img \
+  -o noble-server-cloudimg-amd64.img
+```
+
 To use an Ubuntu cloud image that is already downloaded, point
-`BASE_IMAGE_PATH` at the existing qcow2 image. When that file exists,
+`BASE_IMAGE_PATH` at the existing image file. When that file exists,
 [qemu.sh](./qemu.sh) skips the download step:
 
 ```bash
 cd ./cocos/hal/cloud-init
-sudo BASE_IMAGE_PATH="$PWD/ubuntu-24.04-server-cloudimg-amd64.qcow2" \
-  CUSTOM_IMAGE_PATH="$PWD/ubuntu-cocos-prep.qcow2" \
+sudo BASE_IMAGE_PATH="$PWD/noble-server-cloudimg-amd64.img" \
+  CUSTOM_IMAGE_PATH="$PWD/noble-cocos-prep.qcow2" \
   ./qemu.sh
 ```
 
 What [qemu.sh](./qemu.sh) does:
 
-- loads defaults from [`.env`](../cloud/.env)
-- downloads the base Ubuntu image if it is missing
+- loads defaults from the shared [`.env`](../cloud/.env) in `hal/cloud`
+- downloads the Ubuntu Noble cloud image if it is missing
 - recreates `seed.iso`
 - deletes and recreates the writable qcow2 overlay image
 - boots QEMU with the seed ISO attached as a CD-ROM and the writable qcow2 attached as the VM disk
@@ -149,7 +168,7 @@ Useful environment overrides for [qemu.sh](./qemu.sh):
 Example:
 
 ```bash
-sudo BASE_IMAGE_PATH=./ubuntu-base.qcow2 CUSTOM_IMAGE_PATH=./ubuntu-custom.qcow2 ./qemu.sh
+sudo BASE_IMAGE_PATH=./noble-server-cloudimg-amd64.img CUSTOM_IMAGE_PATH=./noble-custom.qcow2 ./qemu.sh
 ```
 
 Example with package selection:
@@ -161,7 +180,7 @@ sudo COCOS_INSTALL_AGENT=false COCOS_INSTALL_WASMEDGE=false ./qemu.sh
 Example with a single firmware file:
 
 ```bash
-sudo OVMF_FILE=./OVMF.fd BASE_IMAGE_PATH=./base-image.qcow2 ./qemu.sh
+sudo OVMF_FILE=./OVMF.fd BASE_IMAGE_PATH=./noble-server-cloudimg-amd64.img ./qemu.sh
 ```
 
 ## What The Guest Configures
