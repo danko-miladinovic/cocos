@@ -72,6 +72,110 @@ func TestStartSudo(t *testing.T) {
 	_ = vm.Stop()
 }
 
+func TestStart_EnableDisk(t *testing.T) {
+	toolsDir := t.TempDir()
+	logFile := filepath.Join(toolsDir, "qemu-img-create.log")
+
+	writeFakeExecutable(t, toolsDir, "qemu-img", fmt.Sprintf(`#!/bin/sh
+case "$1" in
+info)
+  printf '%%s' '{"virtual-size":2147483648}'
+  ;;
+create)
+  printf '%%s\n' "$@" > %q
+  : > "$4"
+  ;;
+*)
+  echo "unexpected subcommand: $1" >&2
+  exit 2
+  ;;
+esac
+`, logFile))
+
+	writeFakeExecutable(t, toolsDir, "fake-qemu", `#!/bin/sh
+trap 'exit 0' TERM INT
+while :; do
+  sleep 1
+done
+`)
+	prependPath(t, toolsDir)
+
+	config := VMInfo{Config: Config{
+		EnableTDX:   true,
+		EnableDisk:  true,
+		QemuBinPath: "fake-qemu",
+		DiskConfig: DiskConfig{
+			SrcFile: "img/enc_os.qcow2",
+			ID:      "disk0",
+			Format:  "qcow2",
+			SCSIID:  "scsi0",
+		},
+	}}
+
+	vm := NewVM(config, testComputationID, slog.Default()).(*qemuVM)
+
+	err := vm.Start()
+	assert.NoError(t, err)
+	assert.NotNil(t, vm.cmd)
+	assert.Contains(t, vm.vmi.Config.DstFile, filepath.Join(tmpDir, diskDstName))
+	_, err = os.Stat(vm.vmi.Config.DstFile)
+	assert.NoError(t, err)
+
+	loggedArgs, err := os.ReadFile(logFile)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{
+		"create",
+		"-f",
+		"qcow2",
+		vm.vmi.Config.DstFile,
+		"3G",
+	}, strings.Fields(string(loggedArgs)))
+
+	err = vm.Stop()
+	assert.NoError(t, err)
+	_, err = os.Stat(vm.vmi.Config.DstFile)
+	assert.Error(t, err)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestStart_EnableDiskCreateError(t *testing.T) {
+	toolsDir := t.TempDir()
+
+	writeFakeExecutable(t, toolsDir, "qemu-img", `#!/bin/sh
+case "$1" in
+info)
+  printf '%s' '{"virtual-size":2147483648}'
+  ;;
+create)
+  echo 'disk create failed' >&2
+  exit 1
+  ;;
+*)
+  echo "unexpected subcommand: $1" >&2
+  exit 2
+  ;;
+esac
+`)
+	prependPath(t, toolsDir)
+
+	config := VMInfo{Config: Config{
+		EnableTDX:   true,
+		EnableDisk:  true,
+		QemuBinPath: "fake-qemu",
+		DiskConfig: DiskConfig{
+			SrcFile: "img/enc_os.qcow2",
+		},
+	}}
+
+	vm := NewVM(config, testComputationID, slog.Default()).(*qemuVM)
+
+	err := vm.Start()
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "qemu-img create failed")
+	assert.ErrorContains(t, err, "disk create failed")
+	assert.Nil(t, vm.cmd)
+}
+
 func TestStop(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		cmd := exec.Command("echo", "test")
@@ -214,11 +318,27 @@ func TestTDXEnabled(t *testing.T) {
 }
 
 func TestSEVSNPEnabledOnHost(t *testing.T) {
-	assert.False(t, SEVSNPEnabledOnHost())
+	cpuinfo, cpuErr := os.ReadFile("/proc/cpuinfo")
+	kernelParam, kernelErr := os.ReadFile("/sys/module/kvm_amd/parameters/sev_snp")
+
+	expected := false
+	if cpuErr == nil && kernelErr == nil {
+		expected = SEVSNPEnabled(string(cpuinfo), string(kernelParam))
+	}
+
+	assert.Equal(t, expected, SEVSNPEnabledOnHost())
 }
 
 func TestTDXEnabledOnHost(t *testing.T) {
-	assert.False(t, TDXEnabledOnHost())
+	cpuinfo, cpuErr := os.ReadFile("/proc/cpuinfo")
+	kernelParam, kernelErr := os.ReadFile("/sys/module/kvm_intel/parameters/tdx")
+
+	expected := false
+	if cpuErr == nil && kernelErr == nil {
+		expected = TDXEnabled(string(cpuinfo), string(kernelParam))
+	}
+
+	assert.Equal(t, expected, TDXEnabledOnHost())
 }
 
 func TestGetVirtualSizeBytes_Success(t *testing.T) {
@@ -329,4 +449,25 @@ exit %d
 	return func() {
 		_ = os.Setenv("PATH", oldPath)
 	}
+}
+
+func writeFakeExecutable(t *testing.T, dir, name, script string) {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake executable %q: %v", name, err)
+	}
+}
+
+func prependPath(t *testing.T, dir string) {
+	t.Helper()
+
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath); err != nil {
+		t.Fatalf("failed to set PATH: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("PATH", oldPath)
+	})
 }

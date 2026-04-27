@@ -195,6 +195,70 @@ func TestConstructQemuArgs_HostData(t *testing.T) {
 	}
 }
 
+func TestConstructQemuArgs_TDX(t *testing.T) {
+	config := Config{
+		EnableKVM: true,
+		EnableTDX: true,
+		Machine:   "q35",
+		CPU:       "EPYC",
+		SMPCount:  4,
+		MaxCPUs:   64,
+		MemID:     "ram1",
+		MemoryConfig: MemoryConfig{
+			Size:  "4096M",
+			Slots: 8,
+			Max:   "64G",
+		},
+		NetDevConfig: NetDevConfig{
+			ID:            "vmnic",
+			HostFwdAgent:  7020,
+			GuestFwdAgent: 7002,
+		},
+		VirtioNetPciConfig: VirtioNetPciConfig{
+			DisableLegacy: "on",
+			IOMMUPlatform: true,
+			Addr:          "0x2",
+		},
+		TDXConfig: TDXConfig{
+			ID:                  "tdx0",
+			QuoteGenerationPort: 4050,
+			OVMF:                "/usr/share/ovmf/OVMF.fd",
+		},
+		KernelConfig: KernelConfig{
+			KernelFile: "img/bzImage",
+			RootFsFile: "img/rootfs.cpio.gz",
+		},
+		KernelCommandLine: "quiet console=null",
+		NoGraphic:         true,
+		Monitor:           "pty",
+	}
+
+	expected := []string{
+		"-enable-kvm",
+		"-machine", "q35",
+		"-cpu", "EPYC",
+		"-smp", "4,maxcpus=64",
+		"-m", "4096M,slots=8,maxmem=64G",
+		"-netdev", "user,id=vmnic,hostfwd=tcp::7020-:7002",
+		"-device", "virtio-net-pci,disable-legacy=on,iommu_platform=true,netdev=vmnic,addr=0x2,romfile=",
+		"-object", "{\"qom-type\":\"tdx-guest\",\"id\":\"tdx0\",\"quote-generation-socket\":{\"type\": \"vsock\", \"cid\":\"2\",\"port\":\"4050\"}}",
+		"-machine", "confidential-guest-support=tdx0,memory-backend=ram1,hpet=off",
+		"-object", "memory-backend-memfd,id=ram1,size=4096M,share=true,prealloc=false",
+		"-bios", "/usr/share/ovmf/OVMF.fd",
+		"-nodefaults",
+		"-kernel", "img/bzImage",
+		"-append", "quiet console=null",
+		"-initrd", "img/rootfs.cpio.gz",
+		"-nographic",
+		"-monitor", "pty",
+	}
+
+	result := config.ConstructQemuArgs()
+	if !reflect.DeepEqual(result, expected) {
+		t.Errorf("ConstructQemuArgs() = %v, want %v", result, expected)
+	}
+}
+
 func TestConstructQemuArgs_EnableDisk(t *testing.T) {
 	config := Config{
 		EnableDisk: true,
