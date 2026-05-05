@@ -259,6 +259,55 @@ func TestConstructQemuArgs_TDX(t *testing.T) {
 	}
 }
 
+func TestConstructQemuArgs_DiskBootSkipsKernelAndInitrd(t *testing.T) {
+	config := Config{
+		EnableKVM:  true,
+		EnableDisk: true,
+		Machine:    "q35",
+		CPU:        "EPYC",
+		SMPCount:   4,
+		MaxCPUs:    64,
+		MemID:      "ram1",
+		MemoryConfig: MemoryConfig{
+			Size:  "2048M",
+			Slots: 5,
+			Max:   "30G",
+		},
+		NetDevConfig: NetDevConfig{
+			ID:            "vmnic",
+			HostFwdAgent:  7020,
+			GuestFwdAgent: 7002,
+		},
+		VirtioNetPciConfig: VirtioNetPciConfig{
+			DisableLegacy: "on",
+			IOMMUPlatform: true,
+			Addr:          "0x2",
+		},
+		DiskConfig: DiskConfig{
+			DstFile: "img/disk.img",
+			ID:      "disk0",
+			Format:  "qcow2",
+			SCSIID:  "scsi0",
+		},
+		KernelConfig: KernelConfig{
+			KernelFile: "img/bzImage",
+			RootFsFile: "img/rootfs.cpio.gz",
+		},
+		NoGraphic: true,
+		Monitor:   "pty",
+	}
+
+	result := config.ConstructQemuArgs()
+
+	for _, forbidden := range []string{"-kernel", "-append", "-initrd"} {
+		for _, arg := range result {
+			if arg == forbidden {
+				t.Fatalf("ConstructQemuArgs() unexpectedly contained %s during disk boot: %v", forbidden, result)
+			}
+		}
+	}
+}
+
 func TestConstructQemuArgs_EnableDisk(t *testing.T) {
 	config := Config{
 		EnableDisk: true,

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -19,14 +20,15 @@ import (
 )
 
 const (
-	firmwareVars             = "OVMF_VARS"
-	KernelFile               = "bzImage"
-	rootfsFile               = "rootfs.cpio"
-	tmpDir                   = "/tmp"
-	diskDstName              = "cvmDisk"
-	interval                 = 5 * time.Second
-	shutdownTimeout          = 30 * time.Second
-	luksHeaderIncreaseSizeGB = 1
+	firmwareVars                  = "OVMF_VARS"
+	KernelFile                    = "bzImage"
+	rootfsFile                    = "rootfs.cpio"
+	tmpDir                        = "/tmp"
+	diskDstName                   = "cvmDisk"
+	interval                      = 5 * time.Second
+	shutdownTimeout               = 30 * time.Second
+	encryptedPartitionSizeDeltaGB = 1
+	sourceDiskFormat              = "qcow2"
 )
 
 type VMInfo struct {
@@ -83,15 +85,28 @@ func (v *qemuVM) Start() (err error) {
 	}
 
 	if v.vmi.Config.EnableDisk {
-		sizeGB, err := GetVirtualSizeGB(v.vmi.Config.SrcFile)
+		srcDiskFile, err := filepath.Abs(v.vmi.Config.SrcFile)
+		if err != nil {
+			return err
+		}
+
+		sizeGB, err := GetVirtualSizeGB(srcDiskFile)
 		if err != nil {
 			return err
 		}
 
 		dstDiskFile := fmt.Sprintf("%s/%s-%s.%s", tmpDir, diskDstName, id, v.vmi.Config.DiskConfig.Format)
-		sizeArg := fmt.Sprintf("%dG", sizeGB+luksHeaderIncreaseSizeGB)
+		sizeArg := fmt.Sprintf("%dG", sizeGB+encryptedPartitionSizeDeltaGB)
 
-		cmd := exec.Command("qemu-img", "create", "-f", v.vmi.Config.DiskConfig.Format, dstDiskFile, sizeArg)
+		cmd := exec.Command(
+			"qemu-img",
+			"create",
+			"-f", v.vmi.Config.DiskConfig.Format,
+			"-F", sourceDiskFormat,
+			"-b", srcDiskFile,
+			dstDiskFile,
+			sizeArg,
+		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("qemu-img create failed: %w: %s", err, string(out))
 		}
@@ -184,6 +199,10 @@ func (v *qemuVM) GetProcess() int {
 func (v *qemuVM) executableAndArgs() (string, []string, error) {
 	exe, err := exec.LookPath(v.vmi.Config.QemuBinPath)
 	if err != nil {
+		return "", nil, err
+	}
+
+	if err := v.vmi.Config.ValidateBootConfig(); err != nil {
 		return "", nil, err
 	}
 

@@ -4,6 +4,7 @@ package qemu
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/caarlos0/env/v10"
 )
@@ -135,6 +136,25 @@ type Config struct {
 	EnvMount   string `env:"ENV_MOUNT"   envDefault:""`
 }
 
+func (config Config) ValidateBootConfig() error {
+	if config.EnableDisk {
+		if strings.TrimSpace(config.DiskConfig.DstFile) == "" {
+			return fmt.Errorf("disk boot enabled but destination disk image is not set")
+		}
+		return nil
+	}
+
+	if strings.TrimSpace(config.KernelConfig.KernelFile) == "" {
+		return fmt.Errorf("kernel boot enabled but kernel image is not set")
+	}
+
+	if strings.TrimSpace(config.KernelConfig.RootFsFile) == "" {
+		return fmt.Errorf("kernel boot enabled but initramfs image is not set")
+	}
+
+	return nil
+}
+
 func (config Config) ConstructQemuArgs() []string {
 	args := []string{}
 
@@ -261,9 +281,11 @@ func (config Config) ConstructQemuArgs() []string {
 		args = append(args, "-nodefaults")
 	}
 
-	args = append(args, "-kernel", config.KernelConfig.KernelFile)
-	args = append(args, "-append", config.KernelCommandLine)
-	args = append(args, "-initrd", config.KernelConfig.RootFsFile)
+	if !config.EnableDisk {
+		args = append(args, "-kernel", config.KernelConfig.KernelFile)
+		args = append(args, "-append", config.KernelCommandLine)
+		args = append(args, "-initrd", config.KernelConfig.RootFsFile)
+	}
 
 	// display
 	if config.NoGraphic {

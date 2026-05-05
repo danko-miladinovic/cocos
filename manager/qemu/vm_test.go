@@ -38,6 +38,10 @@ func TestStart(t *testing.T) {
 			File: tmpFile.Name(),
 		},
 		QemuBinPath: "echo",
+		KernelConfig: KernelConfig{
+			KernelFile: "img/bzImage",
+			RootFsFile: "img/rootfs.cpio.gz",
+		},
 	}}
 
 	vm := NewVM(config, testComputationID, slog.Default()).(*qemuVM)
@@ -61,6 +65,10 @@ func TestStartSudo(t *testing.T) {
 		},
 		QemuBinPath: "echo",
 		UseSudo:     true,
+		KernelConfig: KernelConfig{
+			KernelFile: "img/bzImage",
+			RootFsFile: "img/rootfs.cpio.gz",
+		},
 	}}
 
 	vm := NewVM(config, testComputationID, slog.Default()).(*qemuVM)
@@ -83,7 +91,13 @@ info)
   ;;
 create)
   printf '%%s\n' "$@" > %q
-  : > "$4"
+  dst=""
+  prev=""
+  for arg in "$@"; do
+    dst="$prev"
+    prev="$arg"
+  done
+  : > "$dst"
   ;;
 *)
   echo "unexpected subcommand: $1" >&2
@@ -123,10 +137,16 @@ done
 
 	loggedArgs, err := os.ReadFile(logFile)
 	assert.NoError(t, err)
+	srcFileAbs, err := filepath.Abs("img/enc_os.qcow2")
+	assert.NoError(t, err)
 	assert.Equal(t, []string{
 		"create",
 		"-f",
 		"qcow2",
+		"-F",
+		"qcow2",
+		"-b",
+		srcFileAbs,
 		vm.vmi.Config.DstFile,
 		"3G",
 	}, strings.Fields(string(loggedArgs)))
@@ -253,7 +273,13 @@ func TestStop(t *testing.T) {
 func TestSetProcess(t *testing.T) {
 	vm := &qemuVM{
 		vmi: VMInfo{
-			Config: Config{QemuBinPath: "echo"}, // Use 'echo' as a dummy QEMU binary
+			Config: Config{
+				QemuBinPath: "echo", // Use 'echo' as a dummy QEMU binary
+				KernelConfig: KernelConfig{
+					KernelFile: "img/bzImage",
+					RootFsFile: "img/rootfs.cpio.gz",
+				},
+			},
 		},
 	}
 
