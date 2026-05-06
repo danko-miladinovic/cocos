@@ -120,6 +120,37 @@ echo "[post-image] Packing initramfs..."
     > "${BINARIES_DIR}/rootfs.cpio.gz" )
 echo "[post-image] rootfs.cpio.gz: $(du -sh "${BINARIES_DIR}/rootfs.cpio.gz" | cut -f1)"
 
+ROOTFS_IMAGE="${BINARIES_DIR}/rootfs.ext4"
+VERITY_IMAGE="${BINARIES_DIR}/rootfs.verity"
+ROOT_HASH_FILE="${BINARIES_DIR}/rootfs.roothash"
+VERITYSETUP_BIN="${HOST_DIR}/bin/veritysetup"
+
+if [ ! -x "${VERITYSETUP_BIN}" ]; then
+    VERITYSETUP_BIN="${HOST_DIR}/sbin/veritysetup"
+fi
+
+if [ ! -x "${VERITYSETUP_BIN}" ]; then
+    echo "[post-image] FATAL: host veritysetup not found at ${VERITYSETUP_BIN}"
+    exit 1
+fi
+
+echo "[post-image] Building dm-verity hash image..."
+rm -f "${VERITY_IMAGE}" "${ROOT_HASH_FILE}"
+truncate -s 256M "${VERITY_IMAGE}"
+VERITY_FORMAT_OUTPUT="$("${VERITYSETUP_BIN}" format "${ROOTFS_IMAGE}" "${VERITY_IMAGE}")" || {
+    echo "[post-image] FATAL: veritysetup format failed"
+    exit 1
+}
+
+ROOT_HASH="$(printf '%s\n' "${VERITY_FORMAT_OUTPUT}" | awk -F': ' '/^Root hash:/ {print $2}' | tr -d '[:space:]')"
+if [ -z "${ROOT_HASH}" ]; then
+    echo "[post-image] FATAL: failed to parse dm-verity root hash"
+    printf '%s\n' "${VERITY_FORMAT_OUTPUT}"
+    exit 1
+fi
+printf '%s\n' "${ROOT_HASH}" > "${ROOT_HASH_FILE}"
+echo "[post-image] dm-verity root hash: ${ROOT_HASH}"
+
 # Stage kernel and initramfs for the EFI partition.
 # Buildroot's GRUB2 package has already placed bootx64.efi at
 # ${BINARIES_DIR}/efi-part/EFI/BOOT/bootx64.efi; we add the kernel,
@@ -129,12 +160,12 @@ mkdir -p "${BINARIES_DIR}/efi-part/EFI/BOOT"
 cp "${BINARIES_DIR}/bzImage"        "${BINARIES_DIR}/efi-part/bzImage"
 cp "${BINARIES_DIR}/rootfs.cpio.gz" "${BINARIES_DIR}/efi-part/initrd.cpio.gz"
 
-cat > "${BINARIES_DIR}/efi-part/EFI/BOOT/grub.cfg" << 'GRUBCFG'
+cat > "${BINARIES_DIR}/efi-part/EFI/BOOT/grub.cfg" << GRUBCFG
 set default=0
 set timeout=0
 
 menuentry "Cocos" {
-    linux /bzImage console=ttyS0
+    linux /bzImage console=ttyS0 roothash=${ROOT_HASH} systemd.verity=0 systemd.gpt_auto=0
     initrd /initrd.cpio.gz
 }
 GRUBCFG

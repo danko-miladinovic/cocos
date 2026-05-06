@@ -23,7 +23,8 @@ VM image and its runtime configuration.
 The current Buildroot flow produces a bootable GPT disk image:
 
 - `efi` partition: FAT EFI system partition with GRUB, kernel, and initramfs
-- `root` partition: ext4 root filesystem mounted read-only by the initramfs
+- `root` partition: ext4 root filesystem protected by dm-verity
+- `verity` partition: dm-verity hash tree for the root filesystem
 - `cocos` partition: blank partition provisioned at boot as an encrypted ext4
   filesystem mounted at `/cocos`
 
@@ -52,30 +53,34 @@ then:
 
 1. mounts `/proc`, `/sys`, `devtmpfs`, and `devpts`
 2. assumes the boot disk is `/dev/sda`
-3. mounts `/dev/sda2` as the real root read-only at `/root`
-4. generates a fresh ephemeral key
-5. formats `/dev/sda3` as LUKS2
-6. opens it as `/dev/mapper/cocos_crypt`
-7. formats that mapper as ext4 and mounts it at `/root/cocos`
-8. creates working directories on `/cocos`, including:
+3. opens a dm-verity mapping for the root filesystem using:
+   - `/dev/sda2` as the data partition
+   - `/dev/sda3` as the verity hash partition
+   - `roothash=` from the kernel command line
+4. mounts `/dev/mapper/root_verity` read-only at `/root`
+5. generates a fresh ephemeral key
+6. formats `/dev/sda4` as LUKS2
+7. opens it as `/dev/mapper/cocos_crypt`
+8. formats that mapper as ext4 and mounts it at `/root/cocos`
+9. creates working directories on `/cocos`, including:
    - `/cocos/.cache/oci`
    - `/cocos/datasets`
    - `/cocos/docker`
    - `/cocos/cocos_init`
-9. mounts `tmpfs` on `/tmp` and `/var` because the root filesystem is
+10. mounts `tmpfs` on `/tmp` and `/var` because the root filesystem is
    intentionally read-only
-10. bind-mounts `/cocos/docker` onto `/var/lib/docker`
-11. bind-mounts `/cocos/cocos_init` onto `/cocos_init`
-12. rewrites `/etc/fstab` in the mounted root to describe the live runtime
-13. preserves or adds 9P mounts for:
+11. bind-mounts `/cocos/docker` onto `/var/lib/docker`
+12. bind-mounts `/cocos/cocos_init` onto `/cocos_init`
+13. rewrites `/etc/fstab` in the mounted root to describe the live runtime
+14. preserves or adds 9P mounts for:
     - `certs_share` -> `/etc/certs`
     - `env_share` -> `/etc/cocos`
-14. securely wipes the temporary LUKS key file
-15. runs `switch_root /root /sbin/init`
+15. securely wipes the temporary LUKS key file
+16. runs `switch_root /root /sbin/init`
 
 Important details:
 
-- the root filesystem is mounted directly from `/dev/sda2`
+- the root filesystem is verified through dm-verity before it is mounted
 - `/cocos` is encrypted with an ephemeral per-boot key
 - that key is not persisted, so `/cocos` is provisioned fresh on each boot
 
@@ -165,7 +170,8 @@ and runtime image, including:
 - host `genimage`
 
 The initramfs built in `post-image.sh` is intentionally minimal and contains
-only the binaries needed for early boot and `/cocos` provisioning.
+only the binaries needed for early boot, dm-verity root verification, and
+`/cocos` provisioning.
 
 ## Secure Boot Notes
 
@@ -197,4 +203,12 @@ The resulting boot image is:
 
 ```bash
 /path/to/buildroot/output/images/disk.img
+```
+
+Additional generated artifacts include:
+
+```bash
+/path/to/buildroot/output/images/rootfs.ext4
+/path/to/buildroot/output/images/rootfs.verity
+/path/to/buildroot/output/images/rootfs.roothash
 ```
